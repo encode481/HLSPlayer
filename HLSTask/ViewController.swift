@@ -7,6 +7,7 @@
 //
 
 import UIKit
+import AVFoundation
 
 class ViewController: UIViewController {
 
@@ -29,7 +30,9 @@ class ViewController: UIViewController {
         super.viewWillAppear(animated)
         print("✅")
         
-        self.dataHandler.startDownloading()
+//        self.dataHandler.startDownloading()
+        
+        
         
 //        let path = Bundle.main.path(forResource: "hls_a256K_v4", ofType: "m3u8")
 //        let response = try! String(contentsOfFile: path!)
@@ -43,9 +46,16 @@ class ViewController: UIViewController {
     }
     
     @IBAction func buttonPressed(_ sender: Any) {
-        for dataChunk in self.dataHandler.chunks! {
-            print(dataChunk.downloadState)
-        }
+//        for dataChunk in self.dataHandler.chunks! {
+//            print(dataChunk.downloadState)
+//        }
+        let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] as String
+        
+        let filePath = path.appending("/output.mp3")
+       
+//        let player = try! AVAudioPlayer(contentsOf: URL(fileURLWithPath: filePath))
+        player.play()
+            
     }
 
     @IBAction func pressed(_ sender: Any) {

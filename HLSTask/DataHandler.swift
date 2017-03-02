@@ -18,7 +18,13 @@ class DataHandler: NSObject {
     
     class DataChunk {
         var url: URL
-        var downloadState: ChunkDownloadState = .pending
+        var downloadState: ChunkDownloadState = .pending {
+            didSet {
+                if downloadState == .completed {
+                    DataHandler.write(dataChunk: self)
+                }
+            }
+        }
         var progress: Double = 0.0
         
         var downloadTask: URLSessionDataTask?
@@ -81,6 +87,21 @@ class DataHandler: NSObject {
         return results
     }
     
+    class func write(dataChunk: DataChunk) {
+            let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] as String
+            
+            let filePath = path.appending("/output.mp3")
+            if !FileManager.default.fileExists(atPath: filePath) {
+                FileManager.default.createFile(atPath: filePath, contents: Data(), attributes: nil)
+            }
+    
+            if let file = FileHandle(forUpdatingAtPath: filePath) {
+                file.seek(toFileOffset: UInt64(dataChunk.byteRange.offset))
+                file.write(dataChunk.downloadedData!)
+                file.closeFile()
+            }
+    }
+    
     func downloadPlaylistFrom(url: URL, completion: @escaping (String?, Error?) -> ()) {
         let sessionConfig = URLSessionConfiguration.default
         let session = URLSession(configuration: sessionConfig, delegate: self, delegateQueue: nil)
@@ -99,8 +120,6 @@ class DataHandler: NSObject {
         task.resume()
     }
     
-
-    
     func download(dataChunks: [DataChunk]) {
         let downloadingQueue = DispatchQueue(label: "com.elinext.downloadQueue", qos: .background, attributes: .concurrent)
 
@@ -109,7 +128,6 @@ class DataHandler: NSObject {
             downloadingQueue.async {
                 self.download(dataChunk: dataChunk)
             }
-            
         }
     }
     
@@ -148,13 +166,6 @@ extension DataHandler: URLSessionDataDelegate {
         if let chunk = chunks?.first(where: {$0.downloadTask == task}) {
             chunk.progress = 1.0
             chunk.downloadState = .completed
-            
-            let fileURL = try! FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false).appendingPathComponent("\(chunk.byteRange.offset)")
-            do {
-                try chunk.downloadedData?.write(to: fileURL, options: .atomic)
-            } catch {
-                print(error)
-            }
             downloadSemaphore.signal()
         }
     }
