@@ -11,60 +11,37 @@ import AVFoundation
 
 class ViewController: UIViewController {
 
-    func injected() {
-        self.dismiss(animated: false, completion: nil)
-        self.navigationController?.present(ViewController(), animated: true, completion: nil)
-        print("✅")
-    }
-    
+    var playerView: PlayerView!
+
     let dataHandler = DataHandler(playlistURL: URL(string: "http://pubcache1.arkiva.de/test/hls_a256K_v4.m3u8")!)
-    
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.view.backgroundColor = .white
+        
+        playerView = PlayerView(frame: CGRect(origin: CGPoint.zero, size: CGSize(width: 150, height: 150)), audioPath: dataHandler.contentPath)
+        playerView.delegate = self
+        playerView.progressSource = dataHandler
+        playerView.backgroundColor = .purple
+        playerView.center = self.view.center
+        self.view.addSubview(playerView)
         
     }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        print("✅")
-        
-//        self.dataHandler.startDownloading()
-        
-        
-        
-//        let path = Bundle.main.path(forResource: "hls_a256K_v4", ofType: "m3u8")
-//        let response = try! String(contentsOfFile: path!)
-        
-        //let byteRanges = DataHandler.parseByteRangesFrom(response: response)
-//        print(byteRanges)
-//        let testUrl = URL(string: "http://pubcache1.arkiva.de/test/hls_a256K_v4.m3u8")
-        
-        
-        
-    }
-    
-    @IBAction func buttonPressed(_ sender: Any) {
-//        for dataChunk in self.dataHandler.chunks! {
-//            print(dataChunk.downloadState)
-//        }
-        let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] as String
-        
-        let filePath = path.appending("/output.mp3")
-       
-//        let player = try! AVAudioPlayer(contentsOf: URL(fileURLWithPath: filePath))
-        player.play()
-            
-    }
-
-    @IBAction func pressed(_ sender: Any) {
-       
-    }
-    override func didReceiveMemoryWarning() {
-        super.didReceiveMemoryWarning()
-        // Dispose of any resources that can be recreated.
-    }
-
 }
 
+extension ViewController: PlayerDelegate {
+    func player(_ player: PlayerView, didChangeState state: PlayerState) {
+        switch state {
+        case .uninitialized:
+            self.dataHandler.clearLocalData()
+            break
+        case .fetching:
+            self.dataHandler.startDownloading()
+            break
+        case .playing: break
+        case .paused: break
+        case .completed:
+            self.dataHandler.clearLocalData()
+            break
+        }
+    }
+}

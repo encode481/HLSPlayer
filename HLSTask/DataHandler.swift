@@ -9,46 +9,27 @@
 import Foundation
 
 class DataHandler: NSObject {
-    
-    enum ChunkDownloadState {
-        case downloading
-        case completed
-        case pending
+    var contentPath: String {
+        get {
+            let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] as String
+            return path.appending("/output.mpeg")
+        }
     }
-    
-    class DataChunk {
-        var url: URL
-        var downloadState: ChunkDownloadState = .pending {
-            didSet {
-                if downloadState == .completed {
-                    DataHandler.write(dataChunk: self)
-                }
+    var downloadingProgress: Double {
+        get {
+            if let chunks = self.chunks {
+                return chunks.map { $0.progress }.reduce(0) { $0 + $1 } / Double(chunks.count)
             }
-        }
-        var progress: Double = 0.0
-        
-        var downloadTask: URLSessionDataTask?
-        var byteRange: ByteRange
-        var downloadedData: Data?
-        
-        
-        init(url: URL, byteRange: ByteRange) {
-            self.url = url
-            self.byteRange = byteRange
+            return 0
         }
     }
+    private let playlistURL: URL
+    private let segmentedDownloadURL: URL?
     
-    struct ByteRange {
-        let length: Int
-        let offset: Int
-    }
+    fileprivate var chunks : [DataChunk]?
     
-    let playlistURL: URL
-    let segmentedDownloadURL: URL?
-    var chunks : [DataChunk]?
-    
-    let numberOfConcurrentTasks = 2;
-    let downloadSemaphore: DispatchSemaphore
+    private let numberOfConcurrentTasks = 2;
+    fileprivate let downloadSemaphore: DispatchSemaphore
     
     init(playlistURL: URL) {
         self.downloadSemaphore = DispatchSemaphore(value: self.numberOfConcurrentTasks)
@@ -63,7 +44,7 @@ class DataHandler: NSObject {
                 return
             }
             self?.chunks = DataHandler.parseByteRangesFrom(response: response).map { byteRange in
-                return DataChunk(url: (self?.segmentedDownloadURL)!, byteRange: byteRange)
+                return DataChunk(url: (self?.segmentedDownloadURL)!, byteRange: byteRange, delegate: self!)
             }
             if let chunks = self?.chunks {
                 self?.download(dataChunks: chunks)
@@ -71,38 +52,48 @@ class DataHandler: NSObject {
         }
     }
     
-    class func parseByteRangesFrom(response: String) -> [ByteRange] {
+    func clearLocalData() {
+        if FileManager.default.fileExists(atPath: contentPath) {
+            try! FileManager.default.removeItem(atPath: contentPath)
+        }
+
+    }
+    
+    class func parseByteRangesFrom(response: String) -> [DataChunk.ByteRange] {
         let byteRangePattern = "(?<=BYTERANGE:)(.*)"
         
         let regex = try! NSRegularExpression(pattern: byteRangePattern, options: [])
         
         let matches = regex.matches(in: response, options: [], range: NSRange(location: 0, length: response.characters.count))
-        let results = matches.map { (match) -> ByteRange in
+        let results = matches.map { (match) -> DataChunk.ByteRange in
             let matchedByteRange: [Int] = (response as NSString)
                 .substring(with: match.range)
                 .components(separatedBy: "@")
                 .map { Int($0)! }
-            return ByteRange(length: matchedByteRange[0], offset: matchedByteRange[1])
+            return DataChunk.ByteRange(length: matchedByteRange[0], offset: matchedByteRange[1])
         }
         return results
     }
     
-    class func write(dataChunk: DataChunk) {
-            let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0] as String
-            
-            let filePath = path.appending("/output.mp3")
-            if !FileManager.default.fileExists(atPath: filePath) {
-                FileManager.default.createFile(atPath: filePath, contents: Data(), attributes: nil)
+    //MARK: - FileHandling
+    
+    fileprivate func write(dataChunk: DataChunk) {        
+            if !FileManager.default.fileExists(atPath: contentPath) {
+                FileManager.default.createFile(atPath: contentPath, contents: Data(), attributes: nil)
             }
     
-            if let file = FileHandle(forUpdatingAtPath: filePath) {
+            if let file = FileHandle(forUpdatingAtPath: contentPath) {
                 file.seek(toFileOffset: UInt64(dataChunk.byteRange.offset))
                 file.write(dataChunk.downloadedData!)
                 file.closeFile()
+                dataChunk.downloadedData = nil
             }
     }
     
-    func downloadPlaylistFrom(url: URL, completion: @escaping (String?, Error?) -> ()) {
+    
+    //MARK: - Downloading
+    
+    private func downloadPlaylistFrom(url: URL, completion: @escaping (String?, Error?) -> ()) {
         let sessionConfig = URLSessionConfiguration.default
         let session = URLSession(configuration: sessionConfig, delegate: self, delegateQueue: nil)
         let request = URLRequest(url: url)
@@ -120,7 +111,7 @@ class DataHandler: NSObject {
         task.resume()
     }
     
-    func download(dataChunks: [DataChunk]) {
+    private func download(dataChunks: [DataChunk]) {
         let downloadingQueue = DispatchQueue(label: "com.elinext.downloadQueue", qos: .background, attributes: .concurrent)
 
         for dataChunk in dataChunks {
@@ -131,7 +122,7 @@ class DataHandler: NSObject {
         }
     }
     
-    func download(dataChunk: DataChunk) {
+    private func download(dataChunk: DataChunk) {
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
         let session = URLSession(configuration: sessionConfig, delegate: self, delegateQueue: nil)
@@ -158,7 +149,7 @@ extension DataHandler: URLSessionDataDelegate {
             chunk.downloadedData?.append(data)
             let percentageDownloaded = Double((chunk.downloadedData?.count)!) / Double(chunk.byteRange.length)
             chunk.progress = percentageDownloaded
-            print("downloading \(chunk.byteRange) percentageDownloaded: \(percentageDownloaded)")
+//            print("downloading \(chunk.byteRange) percentageDownloaded: \(percentageDownloaded)")
         }
     }
     
@@ -168,5 +159,22 @@ extension DataHandler: URLSessionDataDelegate {
             chunk.downloadState = .completed
             downloadSemaphore.signal()
         }
+    }
+}
+
+extension DataHandler: DataChunkDelegate {
+    func dataChunk(_ dataChunk: DataChunk, didChangeState state: ChunkDownloadState) {
+        if state == .completed {
+            self.write(dataChunk: dataChunk)
+        }
+    }
+    func dataChunk(_ dataChunk: DataChunk, didChangeProgress progress: Double) {
+        
+    }
+}
+
+extension DataHandler: PlayerProgressSource {
+    func currentDownload() -> Double {
+        return self.downloadingProgress
     }
 }
